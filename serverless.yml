@@ -1,0 +1,55 @@
+service: chime-service
+
+frameworkVersion: ">=1.1.0 <2.0.0"
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: dev
+  region: eu-west-2
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - ssm:GetParameter
+        - ssm:GetParameters
+        - chime:CreateMeeting
+        - chime:DeleteMeeting
+        - chime:GetMeeting
+        - chime:ListMeetings
+        - chime:CreateAttendee
+        - chime:BatchCreateAttendee
+        - chime:DeleteAttendee
+        - chime:GetAttendee
+        - chime:ListAttendees
+        - chime:ListAttendeeTags
+        - chime:ListMeetingTags
+        - chime:ListTagsForResource
+        - chime:TagAttendee
+        - chime:TagMeeting
+        - chime:TagResource
+        - chime:UntagAttendee
+        - chime:UntagMeeting
+        - chime:UntagResource
+      Resource: "*"
+
+functions:
+
+  createRoom:
+    handler: api/meetingService.createRoom
+    memorySize: 128
+    description: signs a token that you send it
+    events:
+      - http:
+          path: room
+          method: post
+          cors: true
+
+  listRooms:
+    handler: api/meetingService.listRooms
+    memorySize: 128
+    description: signs a token that you send it
+    events:
+      - http:
+          path: rooms
+          method: get
+          cors: true
