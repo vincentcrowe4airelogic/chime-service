@@ -43,6 +43,16 @@ functions:
           path: room
           method: post
           cors: true
+  
+  joinRoom:
+    handler: api/meetingService.joinRoom
+    memorySize: 128
+    description: signs a token that you send it
+    events:
+      - http:
+          path: join
+          method: post
+          cors: true
 
   listRooms:
     handler: api/meetingService.listRooms

@@ -54,3 +54,28 @@ module.exports.listRooms = async (event, context, callback) => {
     callback(null, response);
   };
 
+module.exports.joinRoom = async (event, context, callback) => {
+
+    const rsx = await chime.listMeetings().promise();
+
+    const attendeeResponse = await chime.createAttendee({
+        MeetingId: rsx.Meetings[0].MeetingId,
+        ExternalUserId: uuid.v4() // Link the attendee to an identity managed by your application.
+      }).promise();
+
+    const response = {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Allow-Credentials': true,
+      },
+      body: JSON.stringify({
+        meeting: rsx.Meetings[0],
+        attendee: attendeeResponse
+      }),
+    };
+  
+    callback(null, response);
+  };
+
