@@ -7,6 +7,8 @@ provider:
   runtime: nodejs12.x
   stage: dev
   region: eu-west-2
+  environment:
+    APPOINTMENT_TABLE: ${self:service}-${opt:stage, self:provider.stage}-appointments
   iamRoleStatements:
     - Effect: Allow
       Action:
@@ -30,6 +32,14 @@ provider:
         - chime:UntagAttendee
         - chime:UntagMeeting
         - chime:UntagResource
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - ssm:GetParameter
+        - ssm:GetParameters
+
       Resource: "*"
 
 functions:
@@ -63,3 +73,61 @@ functions:
           path: rooms
           method: get
           cors: true
+  
+  createSlot:
+    handler: api/slotService.createSlot
+    memorySize: 128
+    description: create a slot for a subject and host
+    events:
+      - http:
+          path: slot
+          method: post
+          cors: true
+  
+  getSlots:
+    handler: api/slotService.getSlots
+    memorySize: 128
+    description: gets a list of slots and states.
+    events:
+      - http: 
+          path: slots
+          method: get
+          cors: true
+
+  getSlot:
+    handler: api/slotService.getSlot
+    memorySize: 128
+    description: get slot info
+    events:
+      - http:
+          path: slot
+          method: get
+          cors:
+            origin: '*'
+            headers: '*'  
+  
+
+resources:
+  Resources:
+    AppointmentsDynamoDbTable:
+      Type: 'AWS::DynamoDB::Table'
+      DeletionPolicy: Retain
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: "ServiceId"
+            AttributeType: "S"   
+          -
+            AttributeName: "Slot"
+            AttributeType: "S"
+        KeySchema:
+          -
+            AttributeName: "ServiceId"
+            KeyType: "HASH"
+          -
+            AttributeName: "Slot"
+            KeyType: "RANGE"
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.APPOINTMENT_TABLE}
