@@ -4,233 +4,242 @@ const AWS = require('aws-sdk');
 const querystring = require('querystring');
 const uuid = require('uuid');
 
-AWS.config.update({region: 'eu-west-2'});
-const dynamoDB = new AWS.DynamoDB({apiVersion: '2012-08-10'});
-const docClient = new AWS.DynamoDB.DocumentClient({apiVersion: '2012-08-10'});
+AWS.config.update({ region: 'eu-west-2' });
+const dynamoDB = new AWS.DynamoDB({ apiVersion: '2012-08-10' });
+const docClient = new AWS.DynamoDB.DocumentClient({ apiVersion: '2012-08-10' });
 const ssm = new AWS.SSM()
 const chime = new AWS.Chime({ region: 'us-east-1' });
 chime.endpoint = new AWS.Endpoint('https://service.chime.aws.amazon.com/console');
 
 const serviceID = "test-service";
 
+
 module.exports.getSlot = async (event, context, callback) => {
 
-  const slotId = event.queryStringParameters.slot;
-  const slotInfo = await getSlotInfo(slotId);
+    const slotId = event.queryStringParameters.slot;
+    const slotInfo = await getSlotInfo(slotId);
+    let meetingResponse;
+    if (!slotInfo.MeetingId) {
+        meetingResponse = await chime.createMeeting({
+            ClientRequestToken: uuid.v4(),
+            MediaRegion: 'eu-west-2' // Specify the region in which to create the meeting.
+        }).promise();
 
-  const meetingResponse = await chime.createMeeting({        
-    ClientRequestToken: uuid.v4(),
-    MediaRegion: 'eu-west-2' // Specify the region in which to create the meeting.
-  }).promise();
+        await setAppointmentMeetingId(slotId, meetingResponse.Meeting.MeetingId)
+        slotInfo.MeetingId = meetingResponse.Meeting.MeetingId;
+    }
 
-  const attendeeResponse = await chime.createAttendee({
-    MeetingId: meetingResponse.Meeting.MeetingId,
-    ExternalUserId: uuid.v4() // Link the attendee to an identity managed by your application.
-  }).promise();
+    else {
+        meetingResponse = await chime.getMeeting({ MeetingId: slotInfo.MeetingId }).promise();
+    }
 
-  await setAppointmentMeetingId(slotId, meetingResponse.Meeting.MeetingId)
+    const attendeeResponse = await chime.createAttendee({
+        MeetingId: slotInfo.MeetingId,
+        ExternalUserId: uuid.v4() // Link the attendee to an identity managed by your application.
+    }).promise();
 
-  const response = {
-    statusCode: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': '*',
-      'Access-Control-Allow-Credentials': true,
-    },
-    body: JSON.stringify({
-      slotInfo: slotInfo,
-      meeting: meetingResponse,
-      attendee: attendeeResponse
-    })
-  };
+    const response = {
+        statusCode: 200,
+        headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': '*',
+            'Access-Control-Allow-Credentials': true,
+        },
+        body: JSON.stringify({
+            slotInfo: slotInfo,
+            meeting: meetingResponse,
+            attendee: attendeeResponse
+        })
+    };
 
-  callback(null, response);
+    callback(null, response);
 };
 
 
 
 module.exports.createSlot = async (event, context, callback) => {
-  const requestBody = JSON.parse(event.body);
-  const slotId = await insertAppointment(requestBody.subjectName, requestBody.hostName);
-  const response = {
-    statusCode: 201,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': '*',
-      'Access-Control-Allow-Credentials': true,
-    },
-    body: JSON.stringify({
-      message: "Appointment created",
-      slotId: slotId
-    })
-  };
+    const requestBody = JSON.parse(event.body);
+    const slotId = await insertAppointment(requestBody.subjectName, requestBody.hostName);
+    const response = {
+        statusCode: 201,
+        headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': '*',
+            'Access-Control-Allow-Credentials': true,
+        },
+        body: JSON.stringify({
+            message: "Appointment created",
+            slotId: slotId
+        })
+    };
 
-  callback(null, response);
+    callback(null, response);
 }
 
 module.exports.getSlots = async (event, context, callback) => {
-  const slots = await getAppointments();
-  const response = {
-    statusCode: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': '*',
-      'Access-Control-Allow-Credentials': true,
-    },
-    body: JSON.stringify({
-      slots: slots,      
-    })
-  };
+    const slots = await getAppointments();
+    const response = {
+        statusCode: 200,
+        headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': '*',
+            'Access-Control-Allow-Credentials': true,
+        },
+        body: JSON.stringify({
+            slots: slots,
+        })
+    };
 
-  callback(null, response);
+    callback(null, response);
 }
 
 module.exports.updateSlotStatus = async (event, context, callback) => {
-  const requestBody = JSON.parse(event.body);
-  
+    const requestBody = JSON.parse(event.body);
 
-  const slotInfo = await getSlotInfo(requestBody.slotId);
 
-  if (requestBody.subjectName != slotInfo.SubjectName)
-    callback(null, {
-      statusCode: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': '*',
-        'Access-Control-Allow-Credentials': true,
-      },
-    });
-  else {
-    await updateAppointment(requestBody.slotId, requestBody.status);
-    callback(null, {
-      statusCode: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': '*',
-        'Access-Control-Allow-Credentials': true,
-      },
-    });
-  }
+    const slotInfo = await getSlotInfo(requestBody.slotId);
+
+    if (requestBody.subjectName != slotInfo.SubjectName)
+        callback(null, {
+            statusCode: 204,
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': '*',
+                'Access-Control-Allow-Credentials': true,
+            },
+        });
+    else {
+        await updateAppointment(requestBody.slotId, requestBody.status);
+        callback(null, {
+            statusCode: 200,
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': '*',
+                'Access-Control-Allow-Credentials': true,
+            },
+        });
+    }
 }
 
 const getParameter = async (paramName) => {
- const result = await ssm.getParameter({
-   Name: paramName
- }).promise();
+    const result = await ssm.getParameter({
+        Name: paramName
+    }).promise();
 
- return result.Parameter.Value;
+    return result.Parameter.Value;
 }
 
 const insertAppointment = async (subjectName, hostName) => {
-  const slotId = uuid.v4(); 
-  const params = {
-    TableName: process.env.APPOINTMENT_TABLE,
-    Item: {
-      'ServiceId' : {S: serviceID},
-      'Slot' : {S: `slot:${slotId}`},
-      'SubjectName': {S: subjectName},
-      'HostName': {S: hostName},
-      'State' : {S: 'pending'},
-      'MeetingId' : {S: ""}
-    }
-  };
-  
-  await dynamoDB.putItem(params).promise();  
-  return slotId;
+    const slotId = uuid.v4();
+    const params = {
+        TableName: process.env.APPOINTMENT_TABLE,
+        Item: {
+            'ServiceId': { S: serviceID },
+            'Slot': { S: `slot:${slotId}` },
+            'SubjectName': { S: subjectName },
+            'HostName': { S: hostName },
+            'State': { S: 'pending' },
+            'MeetingId': { S: "" }
+        }
+    };
+
+    await dynamoDB.putItem(params).promise();
+    return slotId;
 }
 
 const setAppointmentMeetingId = async (slotId, meetingId) => {
     const params = {
         TableName: process.env.APPOINTMENT_TABLE,
-        Key:{
+        Key: {
             "ServiceId": serviceID,
             "Slot": `slot:${slotId}`
         },
         UpdateExpression: "set #mi = :newMeetingId",
         ExpressionAttributeNames: {
-          "#mi": "MeetingId"
+            "#mi": "MeetingId"
         },
-        ExpressionAttributeValues:{
-            ":newMeetingId": meetingId        
+        ExpressionAttributeValues: {
+            ":newMeetingId": meetingId
         },
-        ReturnValues:"UPDATED_NEW"
-      };
-      await docClient.update(params).promise();
+        ReturnValues: "UPDATED_NEW"
+    };
+    await docClient.update(params).promise();
 }
 
 const updateAppointment = async (slotId, newState) => {
-  const params = {
-    TableName: process.env.APPOINTMENT_TABLE,
-    Key:{
-        "ServiceId": serviceID,
-        "Slot": `slot:${slotId}`
-    },
-    UpdateExpression: "set #st = :newState",
-    ExpressionAttributeNames: {
-      "#st": "State"
-    },
-    ExpressionAttributeValues:{
-        ":newState": newState        
-    },
-    ReturnValues:"UPDATED_NEW"
-  };
-  await docClient.update(params).promise();
+    const params = {
+        TableName: process.env.APPOINTMENT_TABLE,
+        Key: {
+            "ServiceId": serviceID,
+            "Slot": `slot:${slotId}`
+        },
+        UpdateExpression: "set #st = :newState",
+        ExpressionAttributeNames: {
+            "#st": "State"
+        },
+        ExpressionAttributeValues: {
+            ":newState": newState
+        },
+        ReturnValues: "UPDATED_NEW"
+    };
+    await docClient.update(params).promise();
 }
 
 const getAppointments = async () => {
-  const params = {
-    ExpressionAttributeNames: {
-      "#st": "State"
-    },
-    ExpressionAttributeValues: {
-        ':serviceId' : serviceID,
-        ':slot': 'slot:'
-    },
-    KeyConditionExpression: 'ServiceId = :serviceId and begins_with(Slot, :slot)',
-    ProjectionExpression: 'Slot, SubjectName, HostName, #st, MeetingId',    
-    TableName: process.env.APPOINTMENT_TABLE
-  };
+    const params = {
+        ExpressionAttributeNames: {
+            "#st": "State"
+        },
+        ExpressionAttributeValues: {
+            ':serviceId': serviceID,
+            ':slot': 'slot:'
+        },
+        KeyConditionExpression: 'ServiceId = :serviceId and begins_with(Slot, :slot)',
+        ProjectionExpression: 'Slot, SubjectName, HostName, #st, MeetingId',
+        TableName: process.env.APPOINTMENT_TABLE
+    };
 
-  return await scan(params);
+    return await scan(params);
 }
 
 const scan = async (params) => {
 
-  const { Items, LastEvaluatedKey } = await docClient.query(params).promise();
-  
-  const thisData = Items.map(i => ({
-      SlotId: i.Slot.replace("slot:", ""),
-      SubjectName: i.SubjectName,
-      HostName: i.HostName,
-      State: i.State,
-      MeetingId: i.MeetingId
+    const { Items, LastEvaluatedKey } = await docClient.query(params).promise();
+
+    const thisData = Items.map(i => ({
+        SlotId: i.Slot.replace("slot:", ""),
+        SubjectName: i.SubjectName,
+        HostName: i.HostName,
+        State: i.State,
+        MeetingId: i.MeetingId
     }))
 
-  let nextData = []
+    let nextData = []
 
-  if (typeof LastEvaluatedKey != "undefined") {
-    params.ExclusiveStartKey = data.LastEvaluatedKey;
-    nextData = await scan(params);        
-  }      
+    if (typeof LastEvaluatedKey != "undefined") {
+        params.ExclusiveStartKey = data.LastEvaluatedKey;
+        nextData = await scan(params);
+    }
 
-  return [...thisData, ...nextData];       
+    return [...thisData, ...nextData];
 }
 
-const getSlotInfo = async(slotId) => {
+const getSlotInfo = async (slotId) => {
     console.log("get slot " + slotId)
     const params = {
         TableName: process.env.APPOINTMENT_TABLE,
-        Key:{
-            "ServiceId": {S: serviceID},
-            "Slot": {S: "slot:" + slotId}
+        Key: {
+            "ServiceId": { S: serviceID },
+            "Slot": { S: "slot:" + slotId }
         },
-        ProjectionExpression: "SubjectName, HostName"
+        ProjectionExpression: "SubjectName, HostName, MeetingId"
     }
 
     const result = await dynamoDB.getItem(params).promise();
 
     return {
         SubjectName: result.Item.SubjectName.S,
-        HostName: result.Item.HostName.S
+        HostName: result.Item.HostName.S,
+        MeetingId: result.Item.MeetingId.S
     }
 }
