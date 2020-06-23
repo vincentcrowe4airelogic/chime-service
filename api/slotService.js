@@ -28,6 +28,8 @@ module.exports.getSlot = async (event, context, callback) => {
     ExternalUserId: uuid.v4() // Link the attendee to an identity managed by your application.
   }).promise();
 
+  await setAppointmentMeetingId(slotId, meetingResponse.Meeting.MeetingId)
+
   const response = {
     statusCode: 200,
     headers: {
@@ -44,6 +46,8 @@ module.exports.getSlot = async (event, context, callback) => {
 
   callback(null, response);
 };
+
+
 
 module.exports.createSlot = async (event, context, callback) => {
   const requestBody = JSON.parse(event.body);
@@ -82,14 +86,12 @@ module.exports.getSlots = async (event, context, callback) => {
 }
 
 module.exports.updateSlotStatus = async (event, context, callback) => {
-  const requestData = querystring.parse(event.body);
-  const participant = requestData["ParticipantIdentity"];
-  const roomName = requestData["RoomName"];
-  const action = requestData["ParticipantStatus"];
+  const requestBody = JSON.parse(event.body);
+  
 
-  const slotInfo = await getSlotInfo(roomName);
+  const slotInfo = await getSlotInfo(requestBody.slotId);
 
-  if (participant != slotInfo.SubjectName)
+  if (requestBody.subjectName != slotInfo.SubjectName)
     callback(null, {
       statusCode: 204,
       headers: {
@@ -99,7 +101,7 @@ module.exports.updateSlotStatus = async (event, context, callback) => {
       },
     });
   else {
-    await updateAppointment(roomName, action);
+    await updateAppointment(requestBody.slotId, requestBody.status);
     callback(null, {
       statusCode: 200,
       headers: {
@@ -128,12 +130,32 @@ const insertAppointment = async (subjectName, hostName) => {
       'Slot' : {S: `slot:${slotId}`},
       'SubjectName': {S: subjectName},
       'HostName': {S: hostName},
-      'State' : {S: 'pending'}
+      'State' : {S: 'pending'},
+      'MeetingId' : {S: ""}
     }
   };
   
   await dynamoDB.putItem(params).promise();  
   return slotId;
+}
+
+const setAppointmentMeetingId = async (slotId, meetingId) => {
+    const params = {
+        TableName: process.env.APPOINTMENT_TABLE,
+        Key:{
+            "ServiceId": serviceID,
+            "Slot": `slot:${slotId}`
+        },
+        UpdateExpression: "set #mi = :newMeetingId",
+        ExpressionAttributeNames: {
+          "#mi": "MeetingId"
+        },
+        ExpressionAttributeValues:{
+            ":newMeetingId": meetingId        
+        },
+        ReturnValues:"UPDATED_NEW"
+      };
+      await docClient.update(params).promise();
 }
 
 const updateAppointment = async (slotId, newState) => {
@@ -165,7 +187,7 @@ const getAppointments = async () => {
         ':slot': 'slot:'
     },
     KeyConditionExpression: 'ServiceId = :serviceId and begins_with(Slot, :slot)',
-    ProjectionExpression: 'Slot, SubjectName, HostName, #st',    
+    ProjectionExpression: 'Slot, SubjectName, HostName, #st, MeetingId',    
     TableName: process.env.APPOINTMENT_TABLE
   };
 
@@ -180,7 +202,8 @@ const scan = async (params) => {
       SlotId: i.Slot.replace("slot:", ""),
       SubjectName: i.SubjectName,
       HostName: i.HostName,
-      State: i.State
+      State: i.State,
+      MeetingId: i.MeetingId
     }))
 
   let nextData = []
